@@ -7,7 +7,6 @@ export const debounce = (func, delay) => {
     };
 };
 
-// Throttle utility for rate limiting
 export const throttle = (func, limit) => {
     let inThrottle;
     return function () {
@@ -21,7 +20,6 @@ export const throttle = (func, limit) => {
     };
 };
 
-// Memoization utility for expensive computations
 export const memoize = (func) => {
     const cache = new Map();
     return (...args) => {
