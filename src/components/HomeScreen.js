@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { doc, setDoc, collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { doc, setDoc, collection, onSnapshot, orderBy, query, limit } from 'firebase/firestore';
 import { db } from '../firebase_config';
 import messageService from '../services/messageService';
 import userService from '../services/userService';
@@ -20,6 +20,7 @@ const HomeScreen = () => {
     const [showProfile, setShowProfile] = useState(false);
     const [showContacts, setShowContacts] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(''); // Add debounced search
     const [notifications, setNotifications] = useState([]);
     const [showFileUpload, setShowFileUpload] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -44,9 +45,33 @@ const HomeScreen = () => {
         };
     }, []);
 
-    // Add friend to Firestore
+    // Debounce search query to reduce filtering operations
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery);
+        }, 300); // 300ms delay
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Add friend to Firestore (only if not already a friend)
     const addFriend = async (friendId, friendData) => {
         if (!currentUser || friendId === currentUser.uid) return;
+
+        // Check if already a friend to avoid unnecessary write
+        const isAlreadyFriend = friends.some(friend => friend.id === friendId);
+        if (isAlreadyFriend) {
+            // Only update lastContact time if already a friend
+            try {
+                const friendRef = doc(db, 'users', currentUser.uid, 'friends', friendId);
+                await setDoc(friendRef, {
+                    lastContact: new Date()
+                }, { merge: true }); // Use merge to only update lastContact
+            } catch (error) {
+                console.error('Error updating friend lastContact:', error);
+            }
+            return;
+        }
 
         try {
             const friendRef = doc(db, 'users', currentUser.uid, 'friends', friendId);
@@ -58,25 +83,24 @@ const HomeScreen = () => {
                 lastContact: new Date(),
                 addedAt: new Date()
             });
-            console.log('Friend added to Firestore:', friendId);
         } catch (error) {
             console.error('Error adding friend:', error);
         }
     };
 
-    // Load friends with real-time listener
+    // Load friends with real-time listener (optimized with limit)
     useEffect(() => {
         if (!currentUser) return;
 
         const friendsRef = collection(db, 'users', currentUser.uid, 'friends');
-        const friendsQuery = query(friendsRef, orderBy('lastContact', 'desc'));
+        // Limit to most recent 50 friends to reduce data transfer
+        const friendsQuery = query(friendsRef, orderBy('lastContact', 'desc'), limit(50));
 
         const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
             const friendsList = [];
             snapshot.forEach((doc) => {
                 friendsList.push({ id: doc.id, ...doc.data() });
             });
-            console.log('Friends loaded:', friendsList.length);
             setFriends(friendsList);
         }, (error) => {
             console.error('Error loading friends:', error);
@@ -121,8 +145,6 @@ const HomeScreen = () => {
 
     const handleSelectChat = async (contact) => {
         try {
-            console.log('handleSelectChat called with contact:', contact);
-
             // Remove active chat from notification service (to stop suppressing notifications)
             if (selectedChat?.id) {
                 notificationService.removeActiveChat(selectedChat.id);
@@ -136,9 +158,6 @@ const HomeScreen = () => {
                 photoURL: contact.photoURL || null
             };
 
-            console.log('Sanitized contact:', sanitizedContact);
-            console.log('Current user:', currentUser);
-
             const chatRoomId = await messageService.createOrGetChatRoom(currentUser, sanitizedContact);
             const newChat = {
                 id: chatRoomId,
@@ -149,12 +168,19 @@ const HomeScreen = () => {
             setSelectedChat(newChat);
             setShowContacts(false);
 
-            // Add this contact as a friend
+            // Add this contact as a friend (optimized to avoid unnecessary writes)
             await addFriend(sanitizedContact.uid, sanitizedContact);
 
             // Set this chat as active in notification service (to suppress notifications)
             notificationService.setActiveChat(chatRoomId);
-            await markChatNotificationsAsRead(chatRoomId);
+
+            // Only mark notifications as read if there are unread notifications for this chat
+            const unreadChatNotifications = notifications.filter(
+                n => !n.read && n.data?.chatRoomId === chatRoomId
+            );
+            if (unreadChatNotifications.length > 0) {
+                await markChatNotificationsAsRead(chatRoomId);
+            }
         } catch (error) {
             console.error('Error selecting chat:', error);
         }
@@ -182,20 +208,28 @@ const HomeScreen = () => {
                 );
             }
 
-            // Create notification for recipient
-            await notificationService.createNotification(
-                selectedChat.contact.id,
-                currentUser.uid,
-                'message',
-                {
-                    chatRoomId: selectedChat.id,
-                    message: file ? 'Sent a file' : message,
-                    senderName: userProfile?.displayName || currentUser.displayName
-                }
-            );
+            // Only create notification if the recipient is not the same as sender and chat is not active
+            if (selectedChat.contact.uid !== currentUser.uid) {
+                await notificationService.createNotification(
+                    selectedChat.contact.uid,
+                    currentUser.uid,
+                    'message',
+                    {
+                        chatRoomId: selectedChat.id,
+                        message: file ? 'Sent a file' : message,
+                        senderName: userProfile?.displayName || currentUser.displayName
+                    }
+                );
+            }
 
-            // Update friend's last contact time
-            await addFriend(selectedChat.contact.id, selectedChat.contact);
+            // Update friend's last contact time only (more efficient than full friend data)
+            const isAlreadyFriend = friends.some(friend => friend.id === selectedChat.contact.uid);
+            if (isAlreadyFriend) {
+                const friendRef = doc(db, 'users', currentUser.uid, 'friends', selectedChat.contact.uid);
+                await setDoc(friendRef, {
+                    lastContact: new Date()
+                }, { merge: true });
+            }
         } catch (error) {
             console.error('Error sending message:', error);
         }
@@ -210,9 +244,29 @@ const HomeScreen = () => {
         }
     };
 
-    const filteredContacts = contacts.filter(contact =>
-        contact.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        contact.email?.toLowerCase().includes(searchQuery.toLowerCase())
+    const filteredContacts = useMemo(() =>
+        contacts.filter(contact =>
+            contact.displayName?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+            contact.email?.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
+        ), [contacts, debouncedSearchQuery]
+    );
+
+    // Memoize filtered friends to avoid recalculating on every render
+    const filteredFriends = useMemo(() =>
+        friends.filter((friend) => {
+            const name = friend.displayName || friend.email || '';
+            return name.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+        }), [friends, debouncedSearchQuery]
+    );
+
+    // Memoize filtered new contacts
+    const filteredNewContacts = useMemo(() =>
+        debouncedSearchQuery ? contacts.filter(contact => {
+            const isAlreadyFriend = friends.some(friend => friend.id === contact.id);
+            const matchesSearch = contact.displayName?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
+                contact.email?.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+            return !isAlreadyFriend && matchesSearch;
+        }) : [], [contacts, friends, debouncedSearchQuery]
     );
 
     const getUnreadCount = () => {
@@ -249,8 +303,18 @@ const HomeScreen = () => {
                 n => !n.read && n.data?.chatRoomId === chatRoomId
             );
 
-            for (const notification of chatNotifications) {
-                await notificationService.markAsRead(notification.id);
+            if (chatNotifications.length === 0) return; // No unread notifications to mark
+
+            // Use batch operation for efficiency when marking multiple notifications
+            if (chatNotifications.length > 1) {
+                const batch = [];
+                for (const notification of chatNotifications) {
+                    batch.push(notification.id);
+                }
+                await notificationService.markMultipleAsRead(batch);
+            } else {
+                // Single notification - use regular method
+                await notificationService.markAsRead(chatNotifications[0].id);
             }
         } catch (error) {
             console.error('Error marking chat notifications as read:', error);
@@ -298,22 +362,8 @@ const HomeScreen = () => {
     };
 
     const renderFriendsList = () => {
-        // Filter friends based on search query
-        const filteredFriends = friends.filter((friend) => {
-            const name = friend.displayName || friend.email || '';
-            return name.toLowerCase().includes(searchQuery.toLowerCase());
-        });
-
-        // Filter contacts that haven't been added as friends yet but match search
-        const filteredNewContacts = searchQuery ? contacts.filter(contact => {
-            const isAlreadyFriend = friends.some(friend => friend.id === contact.id);
-            const matchesSearch = contact.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                contact.email?.toLowerCase().includes(searchQuery.toLowerCase());
-            return !isAlreadyFriend && matchesSearch;
-        }) : [];
-
         if (filteredFriends.length === 0 && filteredNewContacts.length === 0) {
-            if (searchQuery) {
+            if (debouncedSearchQuery) {
                 return (
                     <div className="no-chats">
                         <div className="no-chats-icon">
@@ -324,7 +374,7 @@ const HomeScreen = () => {
                             </svg>
                         </div>
                         <h3>No friends found</h3>
-                        <p>No friends found for "{searchQuery}"</p>
+                        <p>No friends found for "{debouncedSearchQuery}"</p>
                         <p>Try searching with a different term</p>
                     </div>
                 );
@@ -335,7 +385,7 @@ const HomeScreen = () => {
                             <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                                 <path d="M12 8v8" />
-                                <path d="M8 12h8" />
+                                <path d="M9 12h8" />
                             </svg>
                         </div>
                         <h3>Welcome to ChatApp</h3>

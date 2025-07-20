@@ -12,11 +12,13 @@ import {
     getDocs,
     setDoc,
     getDoc,
-    increment
+    increment,
+    limit
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase_config';
 import { v4 as uuidv4 } from 'uuid';
+import firestoreCache from '../utils/firestoreCache';
 
 class MessageService {
     // Create chat room ID from user IDs
@@ -91,11 +93,12 @@ class MessageService {
         return 'file';
     }
 
-    // Listen to messages in real-time
+    // Listen to messages in real-time (optimized with limit)
     listenToMessages(chatRoomId, callback) {
         const q = query(
             collection(db, 'chatRooms', chatRoomId, 'messages'),
-            orderBy('timestamp', 'asc')
+            orderBy('timestamp', 'desc'), // Changed to desc to get latest messages first
+            limit(100) // Limit to most recent 100 messages to reduce data transfer
         );
 
         return onSnapshot(q, (querySnapshot) => {
@@ -109,20 +112,22 @@ class MessageService {
                     firestoreId: doc.id // Backup reference
                 });
             });
-            callback(messages);
+            // Reverse the array to show oldest messages first in UI
+            callback(messages.reverse());
         }, (error) => {
             console.error('Error listening to messages:', error);
             callback([]); // Return empty array on error
         });
     }
 
-    // Real-time listener for user's chat rooms
+    // Real-time listener for user's chat rooms (optimized with limit)
     listenToUserChatRooms(userId, callback) {
         try {
             const q = query(
                 collection(db, 'chatRooms'),
                 where('participants', 'array-contains', userId),
-                orderBy('lastActivity', 'desc')
+                orderBy('lastActivity', 'desc'),
+                limit(50) // Limit to most recent 50 chat rooms
             );
 
             return onSnapshot(q, (snapshot) => {
@@ -138,7 +143,7 @@ class MessageService {
         }
     }
 
-    // Update chat room activity
+    // Update chat room activity - OPTIMIZED: Added cache invalidation
     async updateChatRoomActivity(chatRoomId, lastMessage) {
         try {
             const chatRoomRef = doc(db, 'chatRooms', chatRoomId);
@@ -152,18 +157,38 @@ class MessageService {
                 lastActivity: serverTimestamp(),
                 messageCount: increment(1)
             }, { merge: true });
+
+            // Invalidate chat room caches for all participants
+            const participants = lastMessage.participants || [];
+            participants.forEach(userId => {
+                const cacheKeys = Array.from(firestoreCache.cache.keys());
+                cacheKeys.forEach(key => {
+                    if (key.startsWith(`chatrooms_${userId}_`)) {
+                        firestoreCache.delete(key);
+                    }
+                });
+            });
         } catch (error) {
             console.error('Error updating chat room activity:', error);
         }
     }
 
-    // Get user's chat rooms
-    async getUserChatRooms(userId) {
+    // Get user's chat rooms - OPTIMIZED: Limited results and added caching
+    async getUserChatRooms(userId, limitResults = 50) {
+        const cacheKey = `chatrooms_${userId}_${limitResults}`;
+
+        // Check cache first (shorter TTL for frequently changing data)
+        const cachedRooms = firestoreCache.get(cacheKey);
+        if (cachedRooms) {
+            return cachedRooms;
+        }
+
         try {
             const q = query(
                 collection(db, 'chatRooms'),
                 where('participants', 'array-contains', userId),
-                orderBy('lastActivity', 'desc')
+                orderBy('lastActivity', 'desc'),
+                limit(limitResults) // Limit to reduce reads
             );
 
             const querySnapshot = await getDocs(q);
@@ -173,6 +198,8 @@ class MessageService {
                 chatRooms.push({ id: doc.id, ...doc.data() });
             });
 
+            // Cache for 1 minute (short TTL due to frequent updates)
+            firestoreCache.set(cacheKey, chatRooms, 60 * 1000);
             return chatRooms;
         } catch (error) {
             console.error('Error getting chat rooms:', error);
@@ -302,12 +329,14 @@ class MessageService {
         }
     }
 
-    // Search messages
-    async searchMessages(chatRoomId, searchTerm) {
+    // Search messages - OPTIMIZED: Limit to recent messages and use debouncing
+    async searchMessages(chatRoomId, searchTerm, limitResults = 50) {
         try {
+            // Limit search to recent messages only to reduce reads
             const q = query(
                 collection(db, 'chatRooms', chatRoomId, 'messages'),
-                orderBy('timestamp', 'desc')
+                orderBy('timestamp', 'desc'),
+                limit(limitResults) // Only search recent messages
             );
 
             const querySnapshot = await getDocs(q);
@@ -320,7 +349,7 @@ class MessageService {
                 }
             });
 
-            return messages;
+            return messages.reverse(); // Return in chronological order
         } catch (error) {
             console.error('Error searching messages:', error);
             return [];

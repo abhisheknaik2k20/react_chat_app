@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import messageService from '../services/messageService';
 import ReactMarkdown from 'react-markdown';
 import './ChatWindow.css';
@@ -8,6 +8,7 @@ const ChatWindow = ({ chat, currentUser, onSendMessage, onFileUpload }) => {
     const [newMessage, setNewMessage] = useState('');
     const [editingMessage, setEditingMessage] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(''); // Add debounced search
     const [showSearch, setShowSearch] = useState(false);
     const [searchResults, setSearchResults] = useState([]);
     const [selectedMessage, setSelectedMessage] = useState(null);
@@ -56,6 +57,40 @@ const ChatWindow = ({ chat, currentUser, onSendMessage, onFileUpload }) => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [selectedMessage]);
+
+    // Debounce search query to reduce expensive search operations
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery);
+        }, 300); // 300ms delay
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Define handleSearch before using it in useEffect
+    const handleSearch = useCallback(async () => {
+        if (!debouncedSearchQuery.trim()) {
+            setSearchResults([]);
+            return;
+        }
+
+        try {
+            // Use the optimized search with limited results
+            const results = await messageService.searchMessages(chat.id, debouncedSearchQuery, 30);
+            setSearchResults(results);
+        } catch (error) {
+            console.error('Error searching messages:', error);
+        }
+    }, [chat.id, debouncedSearchQuery]);
+
+    // Execute search when debounced query changes
+    useEffect(() => {
+        if (debouncedSearchQuery.trim()) {
+            handleSearch();
+        } else {
+            setSearchResults([]);
+        }
+    }, [debouncedSearchQuery, handleSearch]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -148,20 +183,6 @@ const ChatWindow = ({ chat, currentUser, onSendMessage, onFileUpload }) => {
     const cancelEdit = () => {
         setEditingMessage(null);
         setNewMessage('');
-    };
-
-    const handleSearch = async () => {
-        if (!searchQuery.trim()) {
-            setSearchResults([]);
-            return;
-        }
-
-        try {
-            const results = await messageService.searchMessages(chat.id, searchQuery);
-            setSearchResults(results);
-        } catch (error) {
-            console.error('Error searching messages:', error);
-        }
     };
 
     const formatTime = (timestamp) => {

@@ -8,10 +8,14 @@ import {
     query,
     onSnapshot,
     serverTimestamp,
-    orderBy
+    orderBy,
+    limit,
+    writeBatch
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase_config';
+import firestoreCache from '../utils/firestoreCache';
+import connectionManager from '../utils/connectionManager';
 
 class UserService {
     // Create or update user profile
@@ -47,6 +51,28 @@ class UserService {
         return userDoc.data();
     }
 
+    // Batch update multiple user statuses for efficiency
+    async batchUpdateUserStatuses(updates) {
+        try {
+            const batch = writeBatch(db);
+            const timestamp = serverTimestamp();
+
+            updates.forEach(({ userId, isOnline, status }) => {
+                const userRef = doc(db, 'users', userId);
+                batch.update(userRef, {
+                    isOnline,
+                    lastSeen: timestamp,
+                    ...(status && { status })
+                });
+            });
+
+            await batch.commit();
+        } catch (error) {
+            console.error('Error batch updating user statuses:', error);
+            throw error;
+        }
+    }
+
     // Update user status (online/offline)
     async updateUserStatus(userId, isOnline) {
         try {
@@ -61,13 +87,24 @@ class UserService {
         }
     }
 
-    // Update user profile
+    // Update user profile - OPTIMIZED: Added cache invalidation
     async updateUserProfile(userId, updates) {
         try {
             const userRef = doc(db, 'users', userId);
             await updateDoc(userRef, {
                 ...updates,
                 updatedAt: serverTimestamp()
+            });
+
+            // Invalidate cache for this user
+            firestoreCache.delete(`user_${userId}`);
+
+            // Invalidate related search caches (clear all search caches to be safe)
+            const cacheKeys = Array.from(firestoreCache.cache.keys());
+            cacheKeys.forEach(key => {
+                if (key.startsWith('search_users_')) {
+                    firestoreCache.delete(key);
+                }
             });
         } catch (error) {
             console.error('Error updating user profile:', error);
@@ -92,22 +129,52 @@ class UserService {
         }
     }
 
-    // Get user by ID
+    // Get user by ID - OPTIMIZED: Added caching to reduce reads
     async getUserById(userId) {
+        const cacheKey = `user_${userId}`;
+
+        // Check cache first
+        const cachedUser = firestoreCache.get(cacheKey);
+        if (cachedUser) {
+            return cachedUser;
+        }
+
         try {
             const userDoc = await getDoc(doc(db, 'users', userId));
-            return userDoc.exists() ? { id: userDoc.id, ...userDoc.data() } : null;
+            if (userDoc.exists()) {
+                const userData = { id: userDoc.id, ...userDoc.data() };
+                // Cache for 5 minutes
+                firestoreCache.set(cacheKey, userData, 5 * 60 * 1000);
+                return userData;
+            }
+            return null;
         } catch (error) {
             console.error('Error getting user:', error);
             return null;
         }
     }
 
-    // Search users
-    async searchUsers(searchTerm) {
+    // Search users - OPTIMIZED: Limit results, use selective fields, add caching, and check connection
+    async searchUsers(searchTerm, limitResults = 20) {
+        // Check connection before expensive operation
+        if (!connectionManager.canPerformOperation()) {
+            console.log('Cannot perform search - offline or no connection');
+            return [];
+        }
+
+        const cacheKey = `search_users_${searchTerm.toLowerCase()}_${limitResults}`;
+
+        // Check cache first
+        const cachedResults = firestoreCache.get(cacheKey);
+        if (cachedResults) {
+            return cachedResults;
+        }
+
         try {
             const usersRef = collection(db, 'users');
-            const snapshot = await getDocs(usersRef);
+            // Limit search results to reduce reads
+            const q = query(usersRef, orderBy('displayName', 'asc'), limit(limitResults));
+            const snapshot = await getDocs(q);
             const users = [];
 
             snapshot.forEach((doc) => {
@@ -116,10 +183,21 @@ class UserService {
                     userData.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     userData.email?.toLowerCase().includes(searchTerm.toLowerCase())
                 ) {
-                    users.push({ id: doc.id, ...userData });
+                    // Only include essential fields to reduce data transfer
+                    users.push({
+                        id: doc.id,
+                        uid: userData.uid,
+                        displayName: userData.displayName,
+                        email: userData.email,
+                        photoURL: userData.photoURL,
+                        status: userData.status,
+                        isOnline: userData.isOnline
+                    });
                 }
             });
 
+            // Cache results for 2 minutes (shorter TTL for search results)
+            firestoreCache.set(cacheKey, users, 2 * 60 * 1000);
             return users;
         } catch (error) {
             console.error('Error searching users:', error);
@@ -127,17 +205,27 @@ class UserService {
         }
     }
 
-    // Get all users (for contacts list)
-    async getAllUsers(excludeUserId = null) {
+    // Get all users (for contacts list) - OPTIMIZED: Limited results and selective fields
+    async getAllUsers(excludeUserId = null, limitResults = 100) {
         try {
             const usersRef = collection(db, 'users');
-            const q = query(usersRef, orderBy('displayName', 'asc'));
+            const q = query(usersRef, orderBy('displayName', 'asc'), limit(limitResults));
             const snapshot = await getDocs(q);
             const users = [];
 
             snapshot.forEach((doc) => {
                 if (doc.id !== excludeUserId) {
-                    users.push({ id: doc.id, ...doc.data() });
+                    const userData = doc.data();
+                    // Only include essential fields to reduce data transfer
+                    users.push({
+                        id: doc.id,
+                        uid: userData.uid,
+                        displayName: userData.displayName,
+                        email: userData.email,
+                        photoURL: userData.photoURL,
+                        status: userData.status,
+                        isOnline: userData.isOnline
+                    });
                 }
             });
 
@@ -159,18 +247,36 @@ class UserService {
     }
 
     // Listen to all users (for contacts)
+    // Listen to all users (for contacts) - optimized with limit and selective fields
     listenToUsers(excludeUserId, callback) {
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, orderBy('displayName', 'asc'));
+        const q = query(
+            usersRef,
+            orderBy('displayName', 'asc'),
+            limit(100) // Limit to reduce data transfer costs
+        );
 
         return onSnapshot(q, (snapshot) => {
             const users = [];
             snapshot.forEach((doc) => {
                 if (doc.id !== excludeUserId) {
-                    users.push({ id: doc.id, ...doc.data() });
+                    const userData = doc.data();
+                    // Only include essential fields to reduce data transfer
+                    users.push({
+                        id: doc.id,
+                        uid: userData.uid,
+                        displayName: userData.displayName,
+                        email: userData.email,
+                        photoURL: userData.photoURL,
+                        status: userData.status,
+                        isOnline: userData.isOnline
+                    });
                 }
             });
             callback(users);
+        }, (error) => {
+            console.error('Error listening to users:', error);
+            callback([]);
         });
     }
 
@@ -205,15 +311,26 @@ class UserService {
         }
     }
 
-    // Get user's contacts
-    async getUserContacts(userId) {
+    // Get user's contacts - OPTIMIZED: Limited results and selective fields
+    async getUserContacts(userId, limitResults = 100) {
         try {
             const contactsRef = collection(db, 'users', userId, 'contacts');
-            const snapshot = await getDocs(contactsRef);
+            const q = query(contactsRef, orderBy('addedAt', 'desc'), limit(limitResults));
+            const snapshot = await getDocs(q);
             const contacts = [];
 
             snapshot.forEach((doc) => {
-                contacts.push({ id: doc.id, ...doc.data() });
+                const contactData = doc.data();
+                // Only include essential fields to reduce data transfer
+                contacts.push({
+                    id: doc.id,
+                    displayName: contactData.displayName,
+                    email: contactData.email,
+                    photoURL: contactData.photoURL,
+                    status: contactData.status,
+                    isOnline: contactData.isOnline,
+                    addedAt: contactData.addedAt
+                });
             });
 
             return contacts;

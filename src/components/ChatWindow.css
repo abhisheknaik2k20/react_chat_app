@@ -581,8 +581,8 @@
     position: relative;
     display: flex;
     align-items: flex-end;
-    background: #2a3942;
-    border-radius: 21px;
+    background: #e9edef;
+    border-radius: 2px;
     padding: 9px 12px 11px 16px;
     margin: 0 8px;
     border: 1px solid #374045;
@@ -592,7 +592,7 @@
     flex: 1;
     background: transparent;
     border: none;
-    color: #e9edef;
+    color: #0b141a;
     font-size: 15px;
     line-height: 20px;
     outline: none;

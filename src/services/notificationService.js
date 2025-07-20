@@ -120,18 +120,30 @@ class NotificationService {
         }
     }
 
-    // Listen to user notifications
+    // Listen to user notifications - OPTIMIZED: Selective fields and efficient querying
     listenToNotifications(userId, callback) {
         const q = query(
             collection(db, 'notifications'),
             where('recipientId', '==', userId),
-            orderBy('timestamp', 'desc')
+            orderBy('timestamp', 'desc'),
+            limit(50) // Limit to most recent 50 notifications to reduce data transfer
         );
 
         return onSnapshot(q, (querySnapshot) => {
             const notifications = [];
             querySnapshot.forEach((doc) => {
-                notifications.push({ id: doc.id, ...doc.data() });
+                const data = doc.data();
+                // Only include essential notification fields to reduce data transfer
+                notifications.push({
+                    id: doc.id,
+                    recipientId: data.recipientId,
+                    senderId: data.senderId,
+                    type: data.type,
+                    data: data.data,
+                    read: data.read,
+                    timestamp: data.timestamp,
+                    readAt: data.readAt
+                });
             });
             callback(notifications);
         });
@@ -147,6 +159,28 @@ class NotificationService {
             });
         } catch (error) {
             console.error('Error marking notification as read:', error);
+        }
+    }
+
+    // Mark multiple notifications as read using batch operation (more efficient)
+    async markMultipleAsRead(notificationIds) {
+        if (!notificationIds || notificationIds.length === 0) return;
+
+        try {
+            const batch = writeBatch(db);
+            const now = serverTimestamp();
+
+            notificationIds.forEach(notificationId => {
+                const notificationRef = doc(db, 'notifications', notificationId);
+                batch.update(notificationRef, {
+                    read: true,
+                    readAt: now
+                });
+            });
+
+            await batch.commit();
+        } catch (error) {
+            console.error('Error marking multiple notifications as read:', error);
         }
     }
 

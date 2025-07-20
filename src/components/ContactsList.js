@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import './ContactsList.css';
 
 const ContactsList = ({ contacts, onSelectContact, onClose }) => {
     const [searchQuery, setSearchQuery] = useState('');
 
-    const filteredContacts = contacts.filter(contact =>
-        contact.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        contact.email?.toLowerCase().includes(searchQuery.toLowerCase())
+    // Memoize filtered contacts to avoid recalculation on every render
+    const filteredContacts = useMemo(() =>
+        contacts.filter(contact =>
+            contact.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            contact.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        ), [contacts, searchQuery]
     );
 
     const handleContactSelect = (contact) => {

@@ -148,34 +148,36 @@ export class ChatService {
         }
     }
 
-    // Get messages stream for individual chat
-    static getMessagesStream(userId1, userId2) {
+    // Get messages stream for individual chat - OPTIMIZED: Limited results
+    static getMessagesStream(userId1, userId2, limitResults = 100) {
         const chatRoomId = this.createChatRoomId(userId1, userId2);
         const messagesQuery = query(
             collection(db, `chatRooms/${chatRoomId}/messages`),
-            orderBy('timestamp', 'asc')
+            orderBy('timestamp', 'desc'),
+            limit(limitResults) // Limit to reduce real-time data transfer
         );
         return onSnapshot(messagesQuery, (snapshot) => {
             const messages = [];
             snapshot.forEach((doc) => {
                 messages.push({ id: doc.id, ...doc.data() });
             });
-            return messages;
+            return messages.reverse(); // Return in chronological order
         });
     }
 
-    // Get community messages stream
-    static getCommunityMessagesStream(communityId) {
+    // Get community messages stream - OPTIMIZED: Limited results
+    static getCommunityMessagesStream(communityId, limitResults = 100) {
         const messagesQuery = query(
             collection(db, `communities/${communityId}/messages`),
-            orderBy('timestamp', 'asc')
+            orderBy('timestamp', 'desc'),
+            limit(limitResults) // Limit to reduce real-time data transfer
         );
         return onSnapshot(messagesQuery, (snapshot) => {
             const messages = [];
             snapshot.forEach((doc) => {
                 messages.push({ id: doc.id, ...doc.data() });
             });
-            return messages;
+            return messages.reverse(); // Return in chronological order
         });
     }
 

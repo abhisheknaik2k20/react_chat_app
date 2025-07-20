@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import './CommunitiesModal.css';
 
@@ -86,9 +86,12 @@ const CommunitiesModal = ({ onClose, onSelectCommunity }) => {
         }
     };
 
-    const filteredCommunities = communities.filter(community =>
-        community.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        community.description.toLowerCase().includes(searchQuery.toLowerCase())
+    // Memoize filtered communities to avoid recalculation
+    const filteredCommunities = useMemo(() =>
+        communities.filter(community =>
+            community.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            community.description.toLowerCase().includes(searchQuery.toLowerCase())
+        ), [communities, searchQuery]
     );
 
     const handleCommunitySelect = (community) => {

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
@@ -60,9 +60,8 @@ export const AuthProvider = ({ children }) => {
             await userService.updateUserStatus(currentUser.uid, false);
         }
         return signOut(auth);
-    };
-
-    const updateUserProfile = async (updates) => {
+    };    // Memoize expensive operations
+    const updateUserProfile = useCallback(async (updates) => {
         if (!currentUser) return;
 
         try {
@@ -71,7 +70,7 @@ export const AuthProvider = ({ children }) => {
                 await updateProfile(currentUser, { displayName: updates.displayName });
             }
 
-            // Update Firestore profile
+            // Update Firestore profile with batch operation if multiple fields
             await userService.updateUserProfile(currentUser.uid, updates);
 
             // Update local state
@@ -80,9 +79,9 @@ export const AuthProvider = ({ children }) => {
             console.error('Error updating profile:', error);
             throw error;
         }
-    };
+    }, [currentUser]);
 
-    const uploadProfilePicture = async (file) => {
+    const uploadProfilePicture = useCallback(async (file) => {
         if (!currentUser) return;
 
         try {
@@ -99,7 +98,7 @@ export const AuthProvider = ({ children }) => {
             console.error('Error uploading profile picture:', error);
             throw error;
         }
-    };
+    }, [currentUser]);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
