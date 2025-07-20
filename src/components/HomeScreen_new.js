@@ -1,4 +1,4 @@
-// Enhanced HomeScreen.js with Flutter-like navigation and complete functionality
+// Enhanced HomeScreen.js with Flutter-like navigation
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -16,7 +16,6 @@ import CommunitiesModal from './CommunitiesModal';
 import StatusScreen from './StatusScreen';
 import NotificationScreen from './NotificationScreen';
 import ChatBotScreen from './ChatBotScreen';
-import DrawerMenu from './DrawerMenu';
 import './HomeScreen.css';
 
 const HomeScreen = () => {
@@ -185,6 +184,7 @@ const HomeScreen = () => {
             };
 
             const chatRoomId = await messageService.createOrGetChatRoom(currentUser, sanitizedContact);
+
             const newChat = {
                 id: chatRoomId,
                 contact: sanitizedContact,
@@ -315,7 +315,7 @@ const HomeScreen = () => {
         return date.toLocaleDateString();
     };
 
-    // Memoized filtered data
+    // Memoized data filtering
     const filteredContacts = useMemo(() =>
         contacts.filter(contact =>
             contact.displayName?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
@@ -856,31 +856,13 @@ const HomeScreen = () => {
             case 0: // Chat Tab
                 return renderChatContent();
             case 1: // Status Tab
-                return <StatusScreen toggleSidebar={() => setShowDrawerMenu(true)} />;
+                return <StatusScreen toggleDrawer={() => setShowDrawerMenu(true)} />;
             case 2: // Notifications Tab
-                return <NotificationScreen toggleSidebar={() => setShowDrawerMenu(true)} />;
+                return <NotificationScreen toggleDrawer={() => setShowDrawerMenu(true)} />;
             case 3: // Bot Tab
-                return <ChatBotScreen toggleSidebar={() => setShowDrawerMenu(true)} />;
+                return <ChatBotScreen toggleDrawer={() => setShowDrawerMenu(true)} />;
             default:
                 return renderChatContent();
-        }
-    };
-
-    // Handle drawer navigation actions
-    const handleDrawerNavigation = (action) => {
-        switch (action) {
-            case 'home':
-                setActiveTab(0);
-                break;
-            case 'profile':
-                setShowProfile(true);
-                break;
-            case 'web-login':
-                // Implement web login functionality
-                console.log('Web login clicked');
-                break;
-            default:
-                break;
         }
     };
 
@@ -933,13 +915,6 @@ const HomeScreen = () => {
             <div className="chat-container">
                 {renderTabContent()}
             </div>
-
-            {/* Drawer Menu */}
-            <DrawerMenu
-                isOpen={showDrawerMenu}
-                onClose={() => setShowDrawerMenu(false)}
-                onNavigate={handleDrawerNavigation}
-            />
 
             {/* Modals */}
             {showProfile && (

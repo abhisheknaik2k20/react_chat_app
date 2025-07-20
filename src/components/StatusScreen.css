@@ -1,0 +1,305 @@
+.status-screen {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+
+.status-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.status-tabs {
+    display: flex;
+    gap: 2rem;
+}
+
+.tab {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.3s ease;
+}
+
+.tab.active {
+    background: var(--primary-color);
+    color: white;
+}
+
+.status-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.my-status-section {
+    margin-bottom: 2rem;
+}
+
+.my-status-item,
+.status-item,
+.community-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+    cursor: pointer;
+    border-radius: 12px;
+    transition: background-color 0.3s ease;
+}
+
+.my-status-item:hover,
+.status-item:hover,
+.community-item:hover {
+    background: var(--hover-bg);
+}
+
+.status-avatar {
+    width: 56px;
+    height: 56px;
+    margin-right: 1rem;
+    position: relative;
+}
+
+.status-ring {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid var(--primary-color);
+}
+
+.avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.avatar-placeholder img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.add-status-icon {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 20px;
+    height: 20px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.status-info {
+    flex: 1;
+}
+
+.status-name,
+.community-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.status-time,
+.community-description {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.upload-spinner {
+    font-size: 1.2rem;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.recent-updates h3,
+.communities-header h3 {
+    margin: 2rem 0 1rem 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.communities-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 2rem 0 1rem 0;
+}
+
+.create-community-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s ease;
+}
+
+.create-community-btn:hover {
+    transform: scale(1.1);
+}
+
+.community-avatar {
+    width: 56px;
+    height: 56px;
+    margin-right: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.community-icon {
+    width: 100%;
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.create-community-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: var(--bg-color);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.close-btn:hover {
+    background: var(--hover-bg);
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.community-input,
+.community-textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--input-bg);
+    color: var(--text-color);
+    font-family: inherit;
+    margin-bottom: 1rem;
+}
+
+.community-textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.cancel-btn,
+.create-btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.cancel-btn {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.cancel-btn:hover {
+    background: var(--hover-bg);
+}
+
+.create-btn {
+    background: var(--primary-color);
+    color: white;
+}
+
+.create-btn:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+.create-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

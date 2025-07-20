@@ -236,6 +236,31 @@ class UserService {
         }
     }
 
+    // Get all users once (for community creation)
+    async getAllUsersOnce() {
+        try {
+            const usersCollection = collection(db, 'users');
+            const q = query(usersCollection, orderBy('displayName'));
+            const snapshot = await getDocs(q);
+
+            const users = [];
+            snapshot.forEach((doc) => {
+                const userData = doc.data();
+                users.push({
+                    uid: doc.id,
+                    ...userData,
+                    id: doc.id, // Add id for compatibility
+                    name: userData.displayName || userData.email?.split('@')[0] || 'User' // Add name for compatibility
+                });
+            });
+
+            return users;
+        } catch (error) {
+            console.error('Error fetching all users:', error);
+            throw error;
+        }
+    }
+
     // Listen to user presence
     listenToUserPresence(userId, callback) {
         const userRef = doc(db, 'users', userId);

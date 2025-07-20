@@ -683,61 +683,187 @@
     background: #06a474;
 }
 
-/* Responsive Design */
-@media (max-width: 1024px) {
-    .sidebar {
-        width: 35%;
-        min-width: 280px;
-    }
+/* Mobile Navigation Tabs (Flutter-like bottom navigation) */
+.mobile-nav-tabs {
+    display: none;
+    /* Hidden on desktop, shown on mobile */
+    background: #2a3942;
+    border-top: 1px solid #374045;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 8px 0;
 }
 
+.nav-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #8696a0;
+    cursor: pointer;
+    padding: 8px 12px;
+    flex: 1;
+    gap: 4px;
+    position: relative;
+    transition: color 0.2s ease;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.nav-tab.active {
+    color: #00a884;
+}
+
+.nav-tab:hover:not(.active) {
+    color: #e9edef;
+}
+
+.nav-tab span {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.nav-tab svg {
+    width: 20px;
+    height: 20px;
+}
+
+.tab-badge {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    background: #00a884;
+    color: white;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+}
+
+/* Mobile styles for navigation */
 @media (max-width: 768px) {
-    .chat-container {
-        flex-direction: column;
+    .mobile-nav-tabs {
+        display: flex;
     }
 
+    .home-screen {
+        padding-bottom: 70px;
+        /* Space for mobile nav */
+    }
+
+    .chat-container {
+        height: calc(100vh - 70px);
+    }
+
+    /* Hide sidebar actions on mobile when tab navigation is used */
+    .sidebar-actions {
+        display: none !important;
+    }
+
+    /* Adjust sidebar for mobile */
     .sidebar {
-        width: 100%;
-        max-width: none;
-        height: 40vh;
-        border-right: none;
-        border-bottom: 1px solid #2a3942;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
     }
 
     .main-content {
-        height: 60vh;
+        display: none;
+        /* Hidden when sidebar is shown on mobile */
     }
 
-    .chat-avatar-container {
-        margin-right: 10px;
+    .chat-container.chat-open .sidebar {
+        display: none;
     }
 
-    .chat-avatar {
-        width: 45px;
-        height: 45px;
-    }
-
-    .avatar-placeholder {
-        font-size: 16px;
-    }
-
-    .chat-item {
-        min-height: 65px;
-        padding: 6px 12px;
+    .chat-container.chat-open .main-content {
+        display: flex;
+        width: 100%;
     }
 }
 
-@media (max-width: 480px) {
-    .sidebar-header {
-        padding: 8px 12px;
+/* Full-width screen styles for non-chat tabs */
+.tab-screen {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.tab-screen-header {
+    background: #2a3942;
+    padding: 16px 20px;
+    border-bottom: 1px solid #374045;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tab-screen-title {
+    color: #e9edef;
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.tab-screen-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.tab-screen-content {
+    flex: 1;
+    overflow-y: auto;
+    background: #111b21;
+}
+
+/* Enhanced responsive design */
+@media (max-width: 1024px) {
+    .mobile-nav-tabs {
+        display: flex;
     }
 
-    .chat-item {
-        padding: 10px 12px;
+    .home-screen {
+        padding-bottom: 70px;
+    }
+}
+
+/* Tablet styles */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .sidebar {
+        width: 35% !important;
+        min-width: 300px !important;
     }
 
-    .search-container {
-        padding: 6px 8px;
+    .main-content {
+        width: 65% !important;
+    }
+}
+
+/* Desktop styles */
+@media (min-width: 1025px) {
+    .mobile-nav-tabs {
+        display: none !important;
+    }
+
+    .home-screen {
+        padding-bottom: 0;
+    }
+
+    .chat-container {
+        height: 100vh;
     }
 }
 
