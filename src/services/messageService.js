@@ -182,27 +182,40 @@ class MessageService {
 
     // Create or get chat room
     async createOrGetChatRoom(user1, user2) {
-        const chatRoomId = this.createChatRoomId(user1.uid, user2.uid);
+        // Ensure both users have the required uid field
+        const user1Id = user1.uid || user1.id;
+        const user2Id = user2.uid || user2.id;
+
+        if (!user1Id || !user2Id) {
+            throw new Error('Both users must have a valid ID');
+        }
+
+        const chatRoomId = this.createChatRoomId(user1Id, user2Id);
         const chatRoomRef = doc(db, 'chatRooms', chatRoomId);
 
         try {
             const chatRoomDoc = await getDoc(chatRoomRef);
 
             if (!chatRoomDoc.exists()) {
+                // Ensure all required fields are present with defaults
+                const user1Data = {
+                    email: user1.email || '',
+                    displayName: user1.displayName || (user1.email ? user1.email.split('@')[0] : 'Unknown User'),
+                    photoURL: user1.photoURL || null
+                };
+
+                const user2Data = {
+                    email: user2.email || '',
+                    displayName: user2.displayName || (user2.email ? user2.email.split('@')[0] : 'Unknown User'),
+                    photoURL: user2.photoURL || null
+                };
+
                 // Create new chat room
                 await setDoc(chatRoomRef, {
-                    participants: [user1.uid, user2.uid],
+                    participants: [user1Id, user2Id],
                     participantDetails: {
-                        [user1.uid]: {
-                            email: user1.email,
-                            displayName: user1.displayName || user1.email.split('@')[0],
-                            photoURL: user1.photoURL || null
-                        },
-                        [user2.uid]: {
-                            email: user2.email,
-                            displayName: user2.displayName || user2.email.split('@')[0],
-                            photoURL: user2.photoURL || null
-                        }
+                        [user1Id]: user1Data,
+                        [user2Id]: user2Data
                     },
                     createdAt: serverTimestamp(),
                     lastActivity: serverTimestamp(),

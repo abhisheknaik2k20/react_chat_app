@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { doc, setDoc, collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { db } from '../firebase_config';
 import messageService from '../services/messageService';
 import userService from '../services/userService';
 import notificationService from '../services/notificationService';
@@ -13,7 +15,7 @@ import './HomeScreen.css';
 
 const HomeScreen = () => {
     const [selectedChat, setSelectedChat] = useState(null);
-    const [chatRooms, setChatRooms] = useState([]);
+    const [friends, setFriends] = useState([]);
     const [contacts, setContacts] = useState([]);
     const [showProfile, setShowProfile] = useState(false);
     const [showContacts, setShowContacts] = useState(false);
@@ -42,30 +44,45 @@ const HomeScreen = () => {
         };
     }, []);
 
-    const loadChatRooms = useCallback(async () => {
-        if (!currentUser) return;
-        try {
-            const rooms = await messageService.getUserChatRooms(currentUser.uid);
-            console.log('Loaded chat rooms:', rooms.length);
-            setChatRooms(rooms);
-        } catch (error) {
-            console.error('Error loading chat rooms:', error);
-        }
-    }, [currentUser]);
+    // Add friend to Firestore
+    const addFriend = async (friendId, friendData) => {
+        if (!currentUser || friendId === currentUser.uid) return;
 
-    // Real-time listener for chat rooms
+        try {
+            const friendRef = doc(db, 'users', currentUser.uid, 'friends', friendId);
+            await setDoc(friendRef, {
+                id: friendId,
+                displayName: friendData.displayName || friendData.email?.split('@')[0] || 'Unknown',
+                email: friendData.email || '',
+                photoURL: friendData.photoURL || null,
+                lastContact: new Date(),
+                addedAt: new Date()
+            });
+            console.log('Friend added to Firestore:', friendId);
+        } catch (error) {
+            console.error('Error adding friend:', error);
+        }
+    };
+
+    // Load friends with real-time listener
     useEffect(() => {
         if (!currentUser) return;
 
-        // Set up real-time listener for chat rooms using onSnapshot
-        const unsubscribe = messageService.listenToUserChatRooms(currentUser.uid, (rooms) => {
-            console.log('Chat rooms updated in real-time:', rooms.length);
-            setChatRooms(rooms);
+        const friendsRef = collection(db, 'users', currentUser.uid, 'friends');
+        const friendsQuery = query(friendsRef, orderBy('lastContact', 'desc'));
+
+        const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
+            const friendsList = [];
+            snapshot.forEach((doc) => {
+                friendsList.push({ id: doc.id, ...doc.data() });
+            });
+            console.log('Friends loaded:', friendsList.length);
+            setFriends(friendsList);
+        }, (error) => {
+            console.error('Error loading friends:', error);
         });
 
-        return () => {
-            if (unsubscribe) unsubscribe();
-        };
+        return () => unsubscribe();
     }, [currentUser]);
 
     useEffect(() => {
@@ -78,9 +95,6 @@ const HomeScreen = () => {
         const unsubscribeContacts = userService.listenToUsers(currentUser.uid, (users) => {
             setContacts(users);
         });
-
-        // Load user's chat rooms
-        loadChatRooms();
 
         // Listen to notifications
         const unsubscribeNotifications = notificationService.listenToNotifications(
@@ -103,29 +117,43 @@ const HomeScreen = () => {
             unsubscribeNotifications();
             window.removeEventListener('navigateToChat', handleNavigateToChat);
         };
-    }, [currentUser, navigate, loadChatRooms]);
+    }, [currentUser, navigate]);
 
     const handleSelectChat = async (contact) => {
         try {
+            console.log('handleSelectChat called with contact:', contact);
+
             // Remove active chat from notification service (to stop suppressing notifications)
             if (selectedChat?.id) {
                 notificationService.removeActiveChat(selectedChat.id);
             }
 
-            const chatRoomId = await messageService.createOrGetChatRoom(currentUser, contact);
+            // Ensure contact has all required fields
+            const sanitizedContact = {
+                uid: contact.id || contact.uid,
+                email: contact.email || '',
+                displayName: contact.displayName || (contact.email ? contact.email.split('@')[0] : 'Unknown User'),
+                photoURL: contact.photoURL || null
+            };
+
+            console.log('Sanitized contact:', sanitizedContact);
+            console.log('Current user:', currentUser);
+
+            const chatRoomId = await messageService.createOrGetChatRoom(currentUser, sanitizedContact);
             const newChat = {
                 id: chatRoomId,
-                contact,
+                contact: sanitizedContact,
                 messages: []
             };
 
             setSelectedChat(newChat);
             setShowContacts(false);
 
+            // Add this contact as a friend
+            await addFriend(sanitizedContact.uid, sanitizedContact);
+
             // Set this chat as active in notification service (to suppress notifications)
             notificationService.setActiveChat(chatRoomId);
-
-            // Mark notifications for this chat as read
             await markChatNotificationsAsRead(chatRoomId);
         } catch (error) {
             console.error('Error selecting chat:', error);
@@ -166,8 +194,8 @@ const HomeScreen = () => {
                 }
             );
 
-            // Refresh chat rooms list
-            loadChatRooms();
+            // Update friend's last contact time
+            await addFriend(selectedChat.contact.id, selectedChat.contact);
         } catch (error) {
             console.error('Error sending message:', error);
         }
@@ -193,13 +221,21 @@ const HomeScreen = () => {
 
     const handleNavigateToChat = async (chatRoomId) => {
         try {
-            // Find the chat room
-            const room = chatRooms.find(r => r.id === chatRoomId);
-            if (room) {
-                const otherUserId = room.participants.find(p => p !== currentUser.uid);
-                const contact = room.participantDetails[otherUserId];
-                if (contact) {
-                    await handleSelectChat({ id: otherUserId, ...contact });
+            // Extract user IDs from chat room ID
+            const userIds = chatRoomId.split('_');
+            const otherUserId = userIds.find(id => id !== currentUser.uid);
+
+            if (otherUserId) {
+                // Find the friend in our friends list
+                const friend = friends.find(f => f.id === otherUserId);
+                if (friend) {
+                    await handleSelectChat(friend);
+                } else {
+                    // If not in friends list, try to get from contacts
+                    const contact = contacts.find(c => c.id === otherUserId);
+                    if (contact) {
+                        await handleSelectChat(contact);
+                    }
                 }
             }
         } catch (error) {
@@ -235,7 +271,19 @@ const HomeScreen = () => {
 
     const formatNotificationTime = (timestamp) => {
         if (!timestamp) return '';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+
+        let date;
+        if (timestamp.toDate) {
+            // Firestore timestamp
+            date = timestamp.toDate();
+        } else if (timestamp instanceof Date) {
+            // JavaScript Date object
+            date = timestamp;
+        } else {
+            // String or number timestamp
+            date = new Date(timestamp);
+        }
+
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);
@@ -249,107 +297,228 @@ const HomeScreen = () => {
         return date.toLocaleDateString();
     };
 
-    const renderChatList = () => {
-        // Filter chat rooms based on search query
-        const filteredChatRooms = chatRooms.filter((room) => {
-            const otherUserId = room.participants.find(p => p !== currentUser.uid);
-            const contact = room.participantDetails[otherUserId];
-            const name = contact?.displayName || contact?.email || '';
-            const lastMessage = room.lastMessage?.text || '';
-            return name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
+    const renderFriendsList = () => {
+        // Filter friends based on search query
+        const filteredFriends = friends.filter((friend) => {
+            const name = friend.displayName || friend.email || '';
+            return name.toLowerCase().includes(searchQuery.toLowerCase());
         });
 
-        // Filter contacts that haven't been messaged yet but match search
+        // Filter contacts that haven't been added as friends yet but match search
         const filteredNewContacts = searchQuery ? contacts.filter(contact => {
-            const hasExistingChat = chatRooms.some(room =>
-                room.participants.includes(contact.id)
-            );
+            const isAlreadyFriend = friends.some(friend => friend.id === contact.id);
             const matchesSearch = contact.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 contact.email?.toLowerCase().includes(searchQuery.toLowerCase());
-            return !hasExistingChat && matchesSearch;
+            return !isAlreadyFriend && matchesSearch;
         }) : [];
 
-        if (filteredChatRooms.length === 0 && filteredNewContacts.length === 0) {
+        if (filteredFriends.length === 0 && filteredNewContacts.length === 0) {
             if (searchQuery) {
                 return (
                     <div className="no-chats">
-                        <p>No chats found for "{searchQuery}"</p>
+                        <div className="no-chats-icon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                <path d="M9 10h6" />
+                                <path d="M9 14h3" />
+                            </svg>
+                        </div>
+                        <h3>No friends found</h3>
+                        <p>No friends found for "{searchQuery}"</p>
+                        <p>Try searching with a different term</p>
                     </div>
                 );
             } else {
                 return (
                     <div className="no-chats">
-                        <p>No conversations yet</p>
+                        <div className="no-chats-icon">
+                            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                <path d="M12 8v8" />
+                                <path d="M8 12h8" />
+                            </svg>
+                        </div>
+                        <h3>Welcome to ChatApp</h3>
+                        <p>You haven't started any conversations yet</p>
                         <button
                             onClick={() => setShowContacts(true)}
                             className="start-chat-btn"
                         >
-                            Start a new chat
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}>
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                <line x1="12" y1="8" x2="12" y2="16" />
+                                <line x1="8" y1="12" x2="16" y2="12" />
+                            </svg>
+                            Start your first chat
                         </button>
                     </div>
                 );
             }
         }
 
+        const getLastMessagePreview = (friend) => {
+            const relevantNotifications = notifications.filter(n => {
+                if (n.data?.chatRoomId) {
+                    const chatRoomId = n.data.chatRoomId;
+                    const userIds = chatRoomId.split('_');
+                    return userIds.includes(friend.id);
+                }
+                return false;
+            });
+
+            if (relevantNotifications.length > 0) {
+                const lastNotification = relevantNotifications.sort((a, b) => {
+                    const timestampA = a.timestamp?.toDate?.() || new Date(a.timestamp);
+                    const timestampB = b.timestamp?.toDate?.() || new Date(b.timestamp);
+                    return timestampB - timestampA;
+                })[0];
+
+                const isFromCurrentUser = lastNotification.senderId === currentUser.uid;
+                const prefix = isFromCurrentUser ? 'You: ' : '';
+                const message = lastNotification.data?.message || 'New message';
+
+                return `${prefix}${message.length > 35 ? message.substring(0, 35) + '...' : message}`;
+            }
+
+            return friend.lastMessage || 'Tap to start chatting';
+        };
+
+        const getOnlineStatus = (friend) => {
+            // Simulate online status - in a real app, you'd have this data from Firestore
+            const isOnline = Math.random() > 0.5; // Random for demo
+            return isOnline;
+        };
+
+        const getMessageStatus = (friend) => {
+            const relevantNotifications = notifications.filter(n => {
+                if (n.data?.chatRoomId) {
+                    const chatRoomId = n.data.chatRoomId;
+                    const userIds = chatRoomId.split('_');
+                    return userIds.includes(friend.id) && n.senderId === currentUser.uid;
+                }
+                return false;
+            });
+
+            if (relevantNotifications.length > 0) {
+                // Simulate message status - delivered, read, etc.
+                return 'delivered'; // 'sent', 'delivered', 'read'
+            }
+            return null;
+        };
+
         return (
             <>
-                {/* Existing chat rooms */}
-                {filteredChatRooms.map((room) => {
-                    const otherUserId = room.participants.find(p => p !== currentUser.uid);
-                    const contact = room.participantDetails[otherUserId];
-                    const lastMessage = room.lastMessage;
-                    const unreadCount = notifications.filter(n =>
-                        !n.read && n.data?.chatRoomId === room.id
-                    ).length;
+                {/* Existing friends */}
+                {filteredFriends.map((friend) => {
+                    const unreadCount = notifications.filter(n => {
+                        if (!n.read && n.data?.chatRoomId) {
+                            const chatRoomId = n.data.chatRoomId;
+                            const userIds = chatRoomId.split('_');
+                            return userIds.includes(friend.id);
+                        }
+                        return false;
+                    }).length;
+
+                    const chatRoomId = messageService.createChatRoomId(currentUser.uid, friend.id);
+                    const isSelected = selectedChat?.id === chatRoomId;
+                    const lastMessagePreview = getLastMessagePreview(friend);
+                    const isOnline = getOnlineStatus(friend);
+                    const messageStatus = getMessageStatus(friend);
+                    const hasUnread = unreadCount > 0;
 
                     return (
                         <div
-                            key={room.id}
-                            className={`chat-item ${selectedChat?.id === room.id ? 'active' : ''}`}
-                            onClick={() => {
-                                if (contact) {
-                                    setSelectedChat({
-                                        id: room.id,
-                                        contact: { id: otherUserId, ...contact }
-                                    });
-                                    markChatNotificationsAsRead(room.id);
-                                }
-                            }}
+                            key={friend.id}
+                            className={`chat-item ${isSelected ? 'active' : ''} ${hasUnread ? 'has-unread' : ''}`}
+                            onClick={() => handleSelectChat(friend)}
                         >
-                            <div className="chat-avatar">
-                                {contact?.photoURL ? (
-                                    <img src={contact.photoURL} alt={contact.displayName} />
-                                ) : (
-                                    <span>{contact?.displayName?.[0] || contact?.email?.[0] || '?'}</span>
-                                )}
-                            </div>
-                            <div className="chat-info">
-                                <div className="chat-header-info">
-                                    <div className="chat-name">
-                                        {contact?.displayName || contact?.email || 'Unknown'}
-                                    </div>
-                                    <div className="chat-time">
-                                        {lastMessage?.timestamp ?
-                                            formatNotificationTime(lastMessage.timestamp) :
-                                            ''
-                                        }
-                                    </div>
-                                </div>
-                                <div className="chat-preview-container">
-                                    <div className="chat-preview">
-                                        {lastMessage?.text || 'No messages yet'}
-                                    </div>
-                                    {unreadCount > 0 && (
-                                        <div className="unread-badge">
-                                            {unreadCount > 99 ? '99+' : unreadCount}
+                            <div className="chat-avatar-container">
+                                <div className="chat-avatar">
+                                    {friend.photoURL ? (
+                                        <img src={friend.photoURL} alt={friend.displayName} />
+                                    ) : (
+                                        <div className="avatar-placeholder">
+                                            <span>{friend.displayName?.[0]?.toUpperCase() || friend.email?.[0]?.toUpperCase() || '?'}</span>
                                         </div>
                                     )}
+                                </div>
+                                {isOnline && <div className="online-indicator"></div>}
+                            </div>
+
+                            <div className="chat-content">
+                                <div className="chat-header">
+                                    <div className="chat-name">
+                                        {friend.displayName || friend.email?.split('@')[0] || 'Unknown'}
+                                        {friend.isTyping && <span className="typing-indicator">typing...</span>}
+                                    </div>
+                                    <div className="chat-meta">
+                                        <div className="chat-time">
+                                            {friend.lastContact ?
+                                                formatNotificationTime(friend.lastContact) :
+                                                'new'
+                                            }
+                                        </div>
+                                        {messageStatus && (
+                                            <div className="message-status">
+                                                {messageStatus === 'sent' && (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <polyline points="20,6 9,17 4,12" />
+                                                    </svg>
+                                                )}
+                                                {messageStatus === 'delivered' && (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <polyline points="20,6 9,17 4,12" />
+                                                        <polyline points="16,6 5,17 0,12" />
+                                                    </svg>
+                                                )}
+                                                {messageStatus === 'read' && (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4FC3F7" strokeWidth="2">
+                                                        <polyline points="20,6 9,17 4,12" />
+                                                        <polyline points="16,6 5,17 0,12" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="chat-preview-row">
+                                    <div className={`chat-preview ${hasUnread ? 'unread' : ''}`}>
+                                        {lastMessagePreview}
+                                    </div>
+                                    <div className="chat-indicators">
+                                        {friend.isPinned && (
+                                            <div className="pin-indicator">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M16 4v4l-4 4-4-4V4h8zm-4 8l4 4v4l-4-4-4 4v-4l4-4z" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                        {friend.isMuted && (
+                                            <div className="mute-indicator">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M11 5L6 9H2v6h4l5 4V5zM22 9l-6 6m0-6l6 6" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                        {hasUnread && (
+                                            <div className="unread-badge">
+                                                {unreadCount > 99 ? '99+' : unreadCount}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     );
                 })}
+
+                {/* Section separator if we have both friends and new contacts */}
+                {filteredFriends.length > 0 && filteredNewContacts.length > 0 && (
+                    <div className="section-separator">
+                        <span>New Contacts</span>
+                    </div>
+                )}
 
                 {/* New contacts that match search */}
                 {filteredNewContacts.map((contact) => (
@@ -358,24 +527,41 @@ const HomeScreen = () => {
                         className="chat-item new-contact"
                         onClick={() => handleSelectChat(contact)}
                     >
-                        <div className="chat-avatar">
-                            {contact.photoURL ? (
-                                <img src={contact.photoURL} alt={contact.displayName} />
-                            ) : (
-                                <span>{contact.displayName?.[0] || contact.email?.[0] || '?'}</span>
-                            )}
+                        <div className="chat-avatar-container">
+                            <div className="chat-avatar">
+                                {contact.photoURL ? (
+                                    <img src={contact.photoURL} alt={contact.displayName} />
+                                ) : (
+                                    <div className="avatar-placeholder new">
+                                        <span>{contact.displayName?.[0]?.toUpperCase() || contact.email?.[0]?.toUpperCase() || '?'}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="new-contact-indicator">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="12" y1="8" x2="12" y2="16" />
+                                    <line x1="8" y1="12" x2="16" y2="12" />
+                                </svg>
+                            </div>
                         </div>
-                        <div className="chat-info">
-                            <div className="chat-header-info">
+
+                        <div className="chat-content">
+                            <div className="chat-header">
                                 <div className="chat-name">
-                                    {contact.displayName || contact.email}
+                                    {contact.displayName || contact.email?.split('@')[0]}
                                 </div>
-                                <div className="chat-status">
-                                    Start chat
+                                <div className="chat-meta">
+                                    <div className="new-chat-label">
+                                        Start chat
+                                    </div>
                                 </div>
                             </div>
-                            <div className="chat-preview">
-                                {contact.status || 'Available'}
+
+                            <div className="chat-preview-row">
+                                <div className="chat-preview">
+                                    {contact.status || 'Available to chat'}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -539,7 +725,7 @@ const HomeScreen = () => {
                             </div>
 
                             <div className="chat-list">
-                                {renderChatList()}
+                                {renderFriendsList()}
                             </div>
                         </>
                     )}

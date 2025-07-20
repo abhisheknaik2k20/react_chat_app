@@ -160,12 +160,6 @@
     width: 400px;
     max-width: 100%;
     overflow: hidden;
-    transform: rotateY(-5deg) rotateX(5deg);
-    transition: transform 0.3s ease;
-}
-
-.chat-window:hover {
-    transform: rotateY(0deg) rotateX(0deg);
 }
 
 .chat-header {
