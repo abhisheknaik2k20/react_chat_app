@@ -7,6 +7,7 @@ const AuthScreen = () => {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [displayName, setDisplayName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -20,13 +21,17 @@ const AuthScreen = () => {
             return setError('Password must be at least 6 characters');
         }
 
+        if (!isLogin && !displayName.trim()) {
+            return setError('Display name is required');
+        }
+
         try {
             setError('');
             setLoading(true);
             if (isLogin) {
                 await login(email, password);
             } else {
-                await signup(email, password);
+                await signup(email, password, displayName.trim());
             }
             navigate('/home');
         } catch (error) {
@@ -34,6 +39,7 @@ const AuthScreen = () => {
         }
         setLoading(false);
     };
+
     return (
         <div className="auth-screen">
             <div className="auth-container">
@@ -62,6 +68,23 @@ const AuthScreen = () => {
                     )}
 
                     <form onSubmit={handleSubmit} className="auth-form">
+                        {!isLogin && (
+                            <div className="form-group">
+                                <label htmlFor="displayName" className="form-label">
+                                    Display Name
+                                </label>
+                                <input
+                                    type="text"
+                                    id="displayName"
+                                    className="form-input"
+                                    placeholder="Enter your display name"
+                                    value={displayName}
+                                    onChange={(e) => setDisplayName(e.target.value)}
+                                    required={!isLogin}
+                                />
+                            </div>
+                        )}
+
                         <div className="form-group">
                             <label htmlFor="email" className="form-label">
                                 Email address
